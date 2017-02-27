@@ -1,0 +1,13 @@
+### FILE MANAGED BY PUPPET ###
+
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+
+## As we re-use the puppet certificates for salt, there is a race condition where the client can attempt
+## to start prior the salt-master having the clients public cert (via an exported resource).  In this case
+## the minion immediately dies.  If this is a prod node, and thus puppet is set to noop by default, then
+## the salt minion will never end up starting.  This works around that issue.  There is no scenario where
+## the salt minion should be disabled on a node so this is considered safe.
+
+* * * * * root pgrep salt-minion > /dev/null 2>&1 || service salt-minion start > /dev/null 2>&1

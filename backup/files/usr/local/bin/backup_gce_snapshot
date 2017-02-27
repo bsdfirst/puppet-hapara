@@ -1,0 +1,111 @@
+#!/bin/bash
+
+
+### FILE MANAGED BY PUPPET ###
+
+
+# Output usage and exit.
+usage() {
+  me=$(basename $0)
+  echo "${me} <-hpzr> [-H --onlyif]"
+  echo ""
+  echo "  -h|--host <host>    Hostname to perform snapshot of (required)."
+  echo "  -p|--project <id>   Google Compute project ID that the node exists in (required)."
+  echo "  -z|--zone <id>      Google Compute zone ID that the node exists in (required)."
+  echo "  -H|--halt           If specified, then host will be shutdown prior to the snapshot."
+  echo "  -r|--retain <spec>  Time that snapshots for this job will be retained (required)."
+  echo "  --onlyif <cmd>      Only execute if the cmd specified returns zero."
+  exit 2
+}
+
+# Validate command line arguments.
+opts=$( getopt -o h:p:z:Hr: --long host:,project:,zone:,halt:,retain:,onlyif: -- "$@" )
+if [ $? != 0 ]; then 
+  usage
+fi
+eval set -- "$opts"
+
+# Set flags based on commandline arguments.
+while true; do
+  case "$1" in
+    -h | --host ) HOST=$2; shift 2 ;;
+    -p | --project ) PROJECT=$2; shift 2 ;;
+    -z | --zone ) ZONE=$2; shift 2 ;;
+    -H | --halt ) HALT="true"; shift ;;
+    -r | --retain ) RETAIN="$2"; shift 2 ;;
+    --onlyif ) ONLYIF="$2"; shift 2 ;;
+    -- ) shift; break ;;
+    * ) break ;;
+  esac
+done
+
+# Check we have required parameters.
+if [ -z "${HOST}" -o -z "${PROJECT}" -o -z "${ZONE}" -o -z "${RETAIN}" ]; then
+  usage
+fi
+
+echo "====> $(date) Starting backup run of '${HOST}'..."
+
+# If onlyif clause is specified, then run the check command.
+if [ ! -z "${ONLYIF}" ]; then
+  echo "====> $(date) Executing onlyif clause: ${ONLYIF}..."
+  ret=$( $ONLYIF )
+  rc=$?
+
+  if [ $rc -ne 0 ]; then
+    echo $ret 1>&2
+    echo "====> $(date) Onlyif command returned ${rc}, aborting backup..."
+    exit 0
+  else
+    echo "====> $(date) Onlyif clause returned 0, continuing backup..."
+  fi
+fi
+
+# Die (non-zero) on any errors of subcommands from this point forward.
+set -e
+
+if [ "$HALT" = 'true' ]; then
+  echo "====> $(date) Stopping instance '$HOST'..."
+  gcloud compute instances stop $HOST --project $PROJECT --zone $ZONE 2>&1
+  STATE='stopped'
+else
+  STATE='running'
+fi
+
+echo "====> $(date) Creating GCE snapshot..."
+gcloud compute disks snapshot $HOST --project $PROJECT --zone $ZONE --snapshot-names backup-$HOST-$STATE-$(date +%Y%m%d%H%M) 2>&1
+
+if [ "$HALT" = 'true' ]; then
+  echo "====> $(date) Starting instance '$HOST'..."
+  gcloud compute instances start $HOST --project $PROJECT --zone $ZONE 2>&1
+fi
+
+echo "====> $(date) Removing snapshots over ${RETAIN} old..."
+
+# Determine the date before which backups should be purged.
+delete_before_date=$(date -d "now - ${RETAIN}" +%Y%m%d%H%M)
+
+# Counter for skipped backups.
+c=0
+
+# Loop through all previous snapshots present.
+for snapshot in $( set -e; set -o pipefail; gcloud compute snapshots list | cut -f1 -d' ' | egrep "^backup-${HOST}" | sort ); do
+  # Parse the date from the end of each backup name.
+  backup_date=$( set -e; set -o pipefail; echo $snapshot | rev | cut -d'-' -f1 | rev )
+
+  # Check if back is older than our cutoff.
+  if [ "$backup_date" -lt "$delete_before_date" ]; then
+    gcloud compute snapshots -q delete $snapshot 2>&1
+  else
+    c=$( expr $c + 1 )
+  fi
+done
+
+# Output the number of backups skipped rather each individual one.
+if [ $c -ne 0 ]; then
+  echo "Skipped ${c} newer backups."
+fi
+
+echo "====> $(date) Backup run complete."
+
+exit 0

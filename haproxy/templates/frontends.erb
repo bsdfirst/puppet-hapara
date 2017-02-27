@@ -1,0 +1,82 @@
+####################################################################################
+## FRONTENDS #######################################################################
+####################################################################################
+
+## Frontend for private services (deny access unless source IP is one of "our" GCE instance IP addresses).
+frontend internal-web
+  description [FRONTEND] Access (HTTP/HTTPS) from nodes within the local GCE network (HTTP: <%= @bind_int_http.split( /\s+/ )[0] %> / HTTPS: <%= @bind_int_https.split( /\s+/ )[0] %>).
+  bind <%= @bind_int_http %>
+  bind <%= @bind_int_https %>
+
+  # Block any requests in the global ip blacklist.
+  http-request deny if { src,map_ip(/etc/haproxy/blacklist_nets) -m found }
+
+  # Remove any HTTP_PROXY headers in order to protect against httpoxy attacks.
+  http-request del-header Proxy
+
+  # Add an X-Forwarded-Proto header with the protocol the request arrived on.
+  reqadd X-Forwarded-Proto:\ http  if !{ ssl_fc }
+  reqadd X-Forwarded-Proto:\ https if  { ssl_fc }
+
+  # Only permit local GCE instances access to this frontend.
+  acl local_net src -n -m ip 127.0.0.1/32
+  acl local_net src -n -m ip -f /etc/haproxy/trusted_ips
+  http-request deny unless local_net
+
+  # Apply any redirects specified.
+  http-request redirect location %[base,map_beg(/etc/haproxy/int_redirect_301.map)] code 301 if { base,map_beg(/etc/haproxy/int_redirect_301.map) -m found }
+  http-request redirect location %[base,map_beg(/etc/haproxy/int_redirect_302.map)] code 302 if { base,map_beg(/etc/haproxy/int_redirect_302.map) -m found }
+
+  # Attempt to select backend based on request path.
+  use_backend %[path,map_beg(/etc/haproxy/int_path_to_backend.map)] if { path,map_beg(/etc/haproxy/int_path_to_backend.map) -m found }
+
+  # Attempt to select backend based on request HTTP Host header.
+  use_backend %[req.hdr(host),lower,map(/etc/haproxy/int_host_to_backend.map,no_match)] if { req.hdr(host),lower,map(/etc/haproxy/int_host_to_backend.map,stats) -m found }
+
+
+## All public facing http requests are redirected to https.
+frontend public-http
+  description [FRONTEND] Cleartext access from public addresses (<%= @bind_pub_http.split( /\s+/ )[0] %>).
+  bind <%= @bind_pub_http %>
+
+  # Block any requests in the global ip blacklist.
+  http-request deny if { src,map_ip(/etc/haproxy/blacklist_nets) -m found }
+
+  # Remove any HTTP_PROXY headers in order to protect against httpoxy attacks.
+  http-request del-header Proxy
+
+  # Add an X-Forwarded-Proto header with the protocol the request arrived on.
+  reqadd X-Forwarded-Proto:\ http  if !{ ssl_fc }
+  reqadd X-Forwarded-Proto:\ https if  { ssl_fc }
+
+  # Redirect all HTTP requests to HTTPS.
+  redirect scheme https code 301
+
+
+## Public facing services.
+frontend public-https
+  description [FRONTEND] Encrypted access from public addresses (<%= @bind_pub_https.split( /\s+/ )[0] %>).
+  bind <%= @bind_pub_https %>
+
+  # Send HSTS header.
+  rspadd Strict-Transport-Security:\ max-age=31536000;\ includeSubDomains;\ preload
+
+  # Block any requests in the global ip blacklist.
+  http-request deny if { src,map_ip(/etc/haproxy/blacklist_nets) -m found }
+
+  # Remove any HTTP_PROXY headers in order to protect against httpoxy attacks.
+  http-request del-header Proxy
+
+  # Add an X-Forwarded-Proto header with the protocol the request arrived on.
+  reqadd X-Forwarded-Proto:\ http  if !{ ssl_fc }
+  reqadd X-Forwarded-Proto:\ https if  { ssl_fc }
+
+  # Apply any redirects specified.
+  http-request redirect location %[base,map_beg(/etc/haproxy/pub_redirect_301.map)] code 301 if { base,map_beg(/etc/haproxy/pub_redirect_301.map) -m found }
+  http-request redirect location %[base,map_beg(/etc/haproxy/pub_redirect_302.map)] code 302 if { base,map_beg(/etc/haproxy/pub_redirect_302.map) -m found }
+
+  # Attempt to select backend based on request path.
+  use_backend %[path,map_beg(/etc/haproxy/pub_path_to_backend.map)] if { path,map_beg(/etc/haproxy/pub_path_to_backend.map) -m found }
+
+  # Attempt to select backend based on request HTTP Host header.
+  use_backend %[req.hdr(host),lower,map(/etc/haproxy/pub_host_to_backend.map,no_match)] if { req.hdr(host),lower,map(/etc/haproxy/pub_host_to_backend.map,stats) -m found }

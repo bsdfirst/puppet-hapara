@@ -1,0 +1,15 @@
+####################################################################################
+## USER LISTS ######################################################################
+####################################################################################
+<%- @userlists.each do | userlist_k, userlist_v | -%>
+
+userlist <%= userlist_k %>
+  <%- userlist_v['groups'].each do | groupname | -%>
+  group <%= groupname %>
+  <%- end -%>
+  <%- userlist_v['users'].each do | username, userparams | -%>
+  <%- if userparams['pwcrypt'] -%>
+  user <%= username %> password <%= userparams['pwcrypt'] %><% if userparams['httpgroups'] %> groups <%= userparams['httpgroups'].join(',') %><% end %>
+  <%- end -%>
+  <%- end -%>
+<%- end -%>

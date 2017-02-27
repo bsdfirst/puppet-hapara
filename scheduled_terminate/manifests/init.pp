@@ -1,0 +1,1 @@
+class scheduled_terminate () {}

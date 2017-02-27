@@ -1,0 +1,38 @@
+####################################################################################
+## GLOBALS #########################################################################
+####################################################################################
+
+global
+
+  # User/dir config.
+  chroot  /var/lib/haproxy
+  pidfile /run/haproxy.pid
+  user    haproxy
+  group   haproxy
+
+  # Logging target for all proxy instances.
+  log /dev/log local0 info
+
+  # Maximum connections we can handle as an instance.
+  maxconn <%= @maxconn %>
+
+  # CPU use percent above which we will no longer compress the output.
+  maxcomprate 70
+
+  # How many 200 byte blocks should be allocated for SSL caching.
+  tune.ssl.cachesize 1000000
+
+  # How long should SSL negotiations be cached for in seconds?
+  tune.ssl.lifetime 900
+
+  # Default cipher config for inbound connections.
+  ssl-default-bind-ciphers   <%= @ciphers %>
+  ssl-default-bind-options   no-sslv3
+
+  # Default cipher config for outbound connections.
+  ssl-default-server-ciphers <%= @ciphers %>
+  ssl-default-server-options no-sslv3
+
+  # Configure local unix socket for API.
+  stats socket  /run/haproxy/admin.sock mode 660 level admin
+  stats timeout 30s

@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+
+from time import sleep
+from subprocess import Popen, PIPE, STDOUT
+import sys
+
+# Any arguments are passed directly to puppet.
+args = sys.argv
+args.pop(0)
+
+
+
+# Function to run puppet, will return False if puppet was locked (already
+# running).  Stdout and stderr are passed through to the console.
+def run():
+
+  # Run puppet inside stdbuf to attempt to eliminate any buffering.
+  with Popen( [ 'stdbuf', '-oL', '-eL', 'puppet' ] + sys.argv, stdout=PIPE, stderr=STDOUT ) as p:
+
+    firstloop=True
+    locked=False
+
+    # Loop through the lines of input until puppet exits.
+    for line in p.stdout:
+
+      # Check if the first line of output indicates puppet already running.
+      if firstloop and ( 'run of puppet configuration client already in progress' in line.lower().decode() ):
+        locked = True
+
+      # Pass the output of puppet through to the console.
+      sys.stdout.write( line.decode() )
+      sys.stdout.flush()
+
+    # Don't waste time on subsequent interations check for 'run in progress' text.
+    firstloop=False
+
+  # If puppet output indicated that a run was already in progress, then return False.
+  if locked:
+    return False
+  else:
+    return True
+
+
+
+# How many attemps should be made, how long should we wait in seconds.
+retries=10
+delay=30
+
+# Retry until run returns true or we run out of retries.
+while not run() and retries:
+  print( 'Will retry in {} seconds. {} attempts remain...'.format( delay, retries ) )
+  sleep( delay )
+  retries -= 1

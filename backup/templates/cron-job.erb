@@ -1,0 +1,29 @@
+### FILE MANAGED BY PUPPET ###
+
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=<%= @email_dest %>
+
+<%
+  cmd = ''
+
+  if @slack
+    cmd << 'slackron '
+  end
+
+  cmd << 'backup_gce_snapshot '
+
+  cmd << "-h '#{@hostname}' "
+  cmd << "-p '#{@gce['project']['projectId']}' "
+  cmd << "-z '#{@gce['instance']['zone']}' "
+  cmd << "-r '#{@retain}' "
+
+  if @halt
+    cmd << "-H "
+  end
+
+  if @onlyif
+    cmd << "--onlyif '#{@onlyif}' "
+  end
+-%>
+<%= @cron %> root <%= cmd %>

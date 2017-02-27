@@ -1,0 +1,37 @@
+#!/bin/bash
+
+
+### FILE MANAGED BY PUPPET ###
+
+
+# Exit if any command returns non-zero.
+set -e
+
+# Get list of all certs and instances within the '###REDACTED###'
+# project.  Have the subshell exit if any command in the pipeline fails.
+instances=$( set -e; set -o pipefail; gcloud compute instances list | cut -d' ' -f1 | tail -n +2 | sort )
+certs=$( set -e; set -o pipefail; puppet cert list --all | grep '###REDACTED###' | cut -d' ' -f2 | tr -d '"' | cut -d'.' -f1 | sort )
+
+# Set flag to catch if restart is required.
+restart=0
+
+# Check for signed certificates that do not correspond to a
+# machine within the project and clean cert/deactivate node.
+for host in $( comm -2 -3 <(echo "$certs") <(echo "$instances") ); do
+  echo -e "\n=====> Cleaning up for dead node '${host}.###REDACTED###'..."
+
+  echo -e "\n:: Clean certificate..."
+  puppet node clean ${host}.###REDACTED### --color=false
+
+  echo -e "\n:: Submit deactivate to puppetdb..."
+  puppet node deactivate ${host}.###REDACTED### --color=false
+
+  restart=1
+done
+
+# At the time of implementation, established clients could continue to use
+# a "cleaned" certificate until the puppetmaster was restarted.
+if [ $restart -ne 0 ]; then
+  echo -e "\n:: Restarting puppetmaster..."
+  service puppetserver restart
+fi

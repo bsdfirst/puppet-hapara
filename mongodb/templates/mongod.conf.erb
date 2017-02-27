@@ -1,0 +1,38 @@
+### FILE MANAGED BY PUPPET ###
+
+
+
+## Available options:
+##   http://docs.mongodb.org/manual/reference/configuration-options/
+
+
+storage:
+  dbPath: /var/lib/mongodb
+  journal:
+    enabled: true
+  engine: wiredTiger
+  directoryPerDB: true
+
+systemLog:
+  destination: file
+  logAppend: true
+  logRotate: reopen
+  timeStampFormat: ctime
+  path: /var/log/mongodb/mongod.log
+
+net:
+  port: <%= @port %>
+  bindIp: <%= @bind.join(',') %>
+  maxIncomingConnections: <%= @max_connections %>
+  http:
+    enabled: false
+    JSONPEnabled: false
+    RESTInterfaceEnabled: false
+
+operationProfiling:
+  slowOpThresholdMs: <%= @slowop_threshold %>
+  mode: <%= @slowop_mode %>
+
+replication:
+  replSetName: <%= @replset_name %>
+  enableMajorityReadConcern: <%= @enable_majority_read_concern %>

@@ -1,0 +1,67 @@
+#!/bin/sh
+
+
+### FILE MANAGED BY PUPPET ###
+
+
+
+##################################################################
+### PARSE COMMANDLINE ARGUMENTS ##################################
+##################################################################
+
+# Function to display usage and exit.
+usage () {
+  echo "Usage: $(basename $0) <hostname regex> [merge] </path/to/log> [additional multitail options]"
+  exit 1
+}
+
+# Must have a least 2 command line arguments.
+[ $# -lt 2 ] && usage
+
+# Parse out commandline.
+PATTERN=$1
+shift
+
+# If the second argument is "merge" then the third argument is
+# the file, otherwise the second argument is the file to tail.
+if [ "x$1" = "xmerge" ]; then
+  [ $# -ge 2 ] || usage
+  FLAG="-L"
+  FILE="$2"
+  shift 2
+else
+  FLAG="-l"
+  FILE="$1"
+  shift
+fi
+
+# Any remaining commandline arguments are passed directly to multitail.
+OPTIONS="$@"
+
+
+
+
+
+##################################################################
+### MULTITAIL LOGIC ##############################################
+##################################################################
+
+# Initialise an empty variable to build the commandline in.
+cmdline=""
+
+# Ensure that ssh doesn't orphan tail processes - ensure it notices network issues and dies immediately.
+ssh_opts="-o ForwardX11=no -o ForwardAgent=yes -o TCPKeepAlive=yes"
+
+# Get hosts that are listed in puppetdb.
+for host in $( ssh g0p-inmgt-01 sudo /opt/puppetlabs/bin/puppet query nodes "''" ); do
+
+  # Check of hostname patches our search pattern.
+  echo $host | grep -q "${PATTERN}"
+  if [ $? -eq 0 ]; then
+    # Build multitail commandline interatively.
+    cmdline="${cmdline} ${FLAG} 'ssh $ssh_opts $host sudo tail -f ${FILE}'"
+  fi
+
+done
+
+eval multitail $OPTIONS $cmdline

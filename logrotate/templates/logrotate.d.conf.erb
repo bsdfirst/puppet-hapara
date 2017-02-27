@@ -1,0 +1,25 @@
+### FILE MANAGED BY PUPPET ###
+
+
+<%- @patterns.each do | pattern | -%>
+<%= pattern %>
+<%- end -%>
+{
+  rotate <%= @retention %>
+  <%= @rotate %>
+  maxsize <%= @maxsize %>
+  dateext
+  dateformat .%Y%m%d-%s+UTC
+  ifempty
+  missingok
+  compress
+  compresscmd /usr/bin/lz4
+  compressext .lz4
+  compressoptions -1 -z
+  sharedscripts
+  <%- if @postrotate -%>
+  postrotate
+    <%= @postrotate %> > /dev/null 2>&1 || :
+  endscript
+  <%- end -%>
+}

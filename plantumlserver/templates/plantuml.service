@@ -1,0 +1,14 @@
+[Unit]
+Description=PlantUML server using built in Jetty
+
+[Service]
+Type=simple
+SyslogIdentifier=plantuml
+User=<%= @user %>
+PIDFile=/run/plantuml.pid
+WorkingDirectory=<%= @path %>/source
+
+ExecStart=/usr/bin/mvn jetty:run -Djetty.port=<%= @bind_port %>
+
+[Install]
+WantedBy=multi-user.target

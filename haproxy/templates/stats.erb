@@ -1,0 +1,31 @@
+####################################################################################
+## STATS LISTENERS #################################################################
+####################################################################################
+
+## Backend and frontend to deliver stats/admin interface from THIS
+## server (content routers are able to contact each other on port 9000).
+listen stats_<%= @hostname %>
+  description [BACKEND] Service statistics for this process.
+  bind <%= @networking['ip'] %>:9000
+  stats enable
+  stats uri /<%= @networking['hostname'] %>
+  stats show-node
+  stats hide-version   # stats page is publically visible, don't expose our version number
+  acl stats_admin query -m reg ^admin   # check for ?admin query string
+  acl stats_authenticated http_auth_group(from_hiera) haproxy-stats   # check if we have already authenticated using the stats_users userlist
+  stats http-request auth if stats_admin ! stats_authenticated   # send auth req. if ?admin in query string and not already authenticated
+  stats admin if stats_authenticated   # switch to admin mode if the user has authenticated
+
+## Return the stats for a given instance based on the first component of the URL path.
+backend stats_dispatcher
+  description [FRONTEND] Route request to stats backends on any content router.
+  option persist   # don't switch server if server not responsive
+  no option redispatch   # don't switch server if server not responsive
+  <%- @servers.each do | server | -%>
+  acl stats_<%= server %> path_reg ^/<%= server %>($|[;/])
+  <%- end -%>
+  http-request deny unless <%= @servers.map { |s| "stats_#{s}" }.join( ' or ' ) %>
+  <%- @servers.each do | server | -%>
+  use-server <%= server %> if stats_<%= server %>
+  server <%= server %> <%= server %>:9000 check
+  <%- end -%>

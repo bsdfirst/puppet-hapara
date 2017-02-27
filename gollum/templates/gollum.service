@@ -1,0 +1,15 @@
+[Unit]
+Description=Gollum server via Unicorn
+
+[Service]
+Type=simple
+SyslogIdentifier=gollum
+User=<%= @user %>
+PIDFile=/run/gollum.pid
+WorkingDirectory=<%= @working_path %>
+
+ExecStart=/usr/local/bin/unicorn -c <%= @working_path %>/unicorn.rb
+ExecReload=/bin/kill -s USR1 $MAINPID
+
+[Install]
+WantedBy=multi-user.target

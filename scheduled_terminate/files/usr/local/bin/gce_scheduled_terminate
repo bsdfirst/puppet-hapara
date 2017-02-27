@@ -1,0 +1,96 @@
+#!/bin/bash
+
+
+### FILE MANAGED BY PUPPET ###
+
+
+# Die non-zero on error.
+set -e
+
+# Google project ID (gcloud on the puppetmaster is only authenticated for the puppetmaster's project).
+project='###REDACTED###'
+
+# Semaphore flag directory.
+semdir=/var/spool/$(basename $0)
+mkdir -p $semdir
+
+# Output usage and exit.
+usage() {
+  me=$(basename $0)
+  echo "${me} <start|stop>"
+  echo "  start   Start all instances that were previously stopped."
+  echo "  stop    Stop all instances configured to be halted in hiera."
+  exit 2
+}
+
+
+# Stop instances helper function.
+stop() {
+
+  # The google cloud API so SOOOO slow stoppping instances, that we do this with salt instead.  We run against all nodes known to salt.  The logic
+  # as to whether to halt a node happens client side and is based on the presence of a file (on the client) that is managed by puppet.  The salt
+  # command checks the file exists and if so a system shutdown is scheduled.  The shutdown command is called using 'at' as shutdown does not
+  # return prior to Xenial.  If the command is sucessfuly scheduled, then 'hostname -s' is called which enables us to build a list of nodes
+  # that has been scheduled for shutdown.  This list is then passed to xargs which creates a semaphore file per node.  This is used by the
+  # start() routine to determine which instances should be started (so that we don't start instances that were manually shutdown).  The
+  # shutdown command sends a warning to the terminal of all logged in users and can be aborted using the `shutdown -c` command.  The cummulative
+  # delay beween the warning period of 60 minutes and the delay of 10 minutes that at introduces to ensure the salt run has time to complete
+  # leads to a delay of 1 hour 10 minutes from job execution to node shutdown.  (Note the 10 minutes is required to accomodate the salt timeout
+  # for minions that are not up at the time the script runs - in practice this time should be under 1 minute.)  Note, it is safe to call start
+  # on a running node, so aborted shutdowns do not need the semaphore cleaned up.
+  salt '*' cmd.run \
+    "test -f /schedule_terminate && echo 'shutdown -P +60 >/dev/null 2>&1' | at now + 10 minutes >/dev/null 2>&1 && hostname -s" \
+    --out=newline_values_only --static --hide-timeout 2>/dev/null | \
+    xargs -n1 -I{} touch "${semdir}/{}"
+
+}
+
+
+# Start instances helper function.
+start() {
+
+  # Declare empty variable to append to node names grouped by zone as we can't mix zones in a single gcloud command.
+  declare -A startlist
+
+  # Loop through all instances (each line contains zone and instance sorted by zone, then instance by virtue of the awk field reversal).  We do
+  # it this way rather than just interating the semaphore directory so that we get a zone (and can group by zone) which is required by gcloud.
+  IFS=$'\n'; for line in $( set -e; set -o pipefail; gcloud compute --project=${project} instances list | awk -F' ' '{print $2,$1}' | tail -n +2 | sort ); do
+
+    # Determine instance and zone (must quote echo to prevent spliting on space).
+    zone=$( echo $line | cut -d' ' -f1 )
+    inst=$( echo $line | cut -d' ' -f2 )
+
+    # Check if semaphore file exists (if it does then this is a node we stopped earlier and we should start it).
+    if [[ -f "${semdir}/${inst}" ]]; then
+      startlist[$zone]="${startlist[$zone]} ${inst}"
+    fi
+
+  done; unset IFS
+
+  # Start instances, grouped by zone for gcloud command.
+  for zone in "${!startlist[@]}"; do
+
+    # Start the instances.
+    echo -n ${startlist[$zone]} | xargs -d' ' -I{} gcloud compute instances start {} --project=${project} --zone=${zone}
+
+    # Remove the semaphore files (omit -rf as not required and protects against $semdir and {} being empty).
+    echo -n ${startlist[$zone]} | xargs -d' ' -n1 -I{} rm ${semdir}/{}
+
+  done
+
+}
+
+
+# Check commandline, must be start or stop.
+if [[ -z $1 ]]; then
+  usage
+fi
+
+# Evaluate commandline and call appropriate function.
+if [[ $1 == 'stop' ]]; then
+  stop
+elif [[ $1 == 'start' ]]; then
+  start
+else
+  usage
+fi

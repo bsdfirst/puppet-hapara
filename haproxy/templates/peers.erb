@@ -1,0 +1,5 @@
+## Share session data between nodes for stick-tables.
+peers contentrouters
+  <%- @servers.each do | server | -%>
+  peer <%= server %> <%= server %>:1024
+  <%- end -%>

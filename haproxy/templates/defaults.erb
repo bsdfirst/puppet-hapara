@@ -1,0 +1,71 @@
+####################################################################################
+## FRONTEND/BACKEND/LISTEN DEFAULTS ################################################
+####################################################################################
+
+defaults
+
+  # Specify html to be delivered for each error type.
+  errorfile 400 /etc/haproxy/errors/400.http
+  errorfile 403 /etc/haproxy/errors/403.http
+  errorfile 408 /etc/haproxy/errors/408.http
+  errorfile 500 /etc/haproxy/errors/500.http
+  errorfile 502 /etc/haproxy/errors/502.http
+  errorfile 503 /etc/haproxy/errors/503.http
+  errorfile 504 /etc/haproxy/errors/504.http
+
+  # Network timeout configuration.
+  timeout check <%= @timeout_check %>
+  timeout connect <%= @timeout_connect %>
+  timeout http-request <%= @timeout_request %>
+  timeout queue <%= @timeout_queue %>
+  timeout client <%= @timeout_client %>
+  timeout server <%= @timeout_server %>
+  timeout client-fin <%= @timeout_client_fin %>
+  retries 3
+
+  # Use the globally configured logger, but don't log probes from the Google Netwokr LB.
+  log global
+  monitor-uri /haproxy-alive
+  monitor-net 169.254.169.254/32
+
+  # Use Layer 7 mode so we can manipulate headers etcetera.
+  mode http
+
+  # Use roundrobin balancing by default (can be overriden per backend).
+  balance roundrobin
+
+  # Default max connections per frontend/backend (set to global max).
+  maxconn <%= @maxconn %>
+
+  # Enable gzip compression for text types.
+  compression algo gzip
+  compression type <%= @comp_types.join( ' ' ) %>
+
+  # Add a uniqu identifier as a header to every request.
+  unique-id-format %{+X}o\ %ci:%cp_%fi:%fp_%Ts_%rt:%pid
+  unique-id-header X-Unique-ID
+
+  # Option flags.
+  option abortonclose
+  option allbackups
+  option checkcache
+  option contstats
+  option forwardfor
+  option httplog
+  option redispatch
+  option srvtcpka
+  option tcp-smart-connect
+
+  <%- if @alert_email -%>
+  # Generate emails on state changes by default.
+  email-alert from <%= @alert_email %>
+  email-alert to <%= @alert_email %>
+  email-alert level alert
+  email-alert mailers local
+
+  <%- end -%>
+  # Establish health probe default timings (can be overriden per backend).
+  default-server inter 2500ms fastinter 500ms downinter 10s rise 10 fall 3
+
+  # If no backends are matched in a frontend, then use the "default_backend" backend.
+  default_backend default_backend

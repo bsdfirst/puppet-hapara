@@ -1,0 +1,44 @@
+#!/bin/sh
+
+
+### FILE MANAGED BY PUPPET ###
+
+
+# Check that we have been passed a hostname.
+if [ -z "$1" ]; then
+  echo "Must pass hostname as first parameter." 1>&2
+  exit 1
+fi
+
+
+
+# Skip if we are the master node (only halt and backup secondaries).
+salt "${1}.*" cmd.run 'mongo --quiet' stdin="d=db.isMaster(); print( d['ismaster'] );" --out=newline_values_only | grep -q '^true$'
+
+if [ $? -eq 0 ]; then
+  echo "Is mongo master node...skip."
+  exit 1
+fi
+
+
+
+# Get the cluster status.
+ret=$( salt "${1}.*" cmd.run 'mongo --quiet' stdin="rs.status()" )
+
+# Check the host was up and responded with it's cluster status.
+echo $ret | grep -q '"state" : [0-9]'
+if [ $? -ne 0 ]; then
+  echo "Couldn't determine cluster status."
+  exit 1
+fi
+
+# Check ALL cluster members are state PRIMARY(1), SECONDARY(2), or ARBITER(7).
+echo $ret | grep -q '"state" : [^127]'
+if [ $? -eq 0 ]; then
+  echo "Mongo cluster has nodes in unhealthy state...skip."
+  exit 1
+fi
+
+
+
+exit 0

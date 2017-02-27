@@ -1,0 +1,142 @@
+from flask import Flask, request, abort
+import re
+import requests
+import hmac
+from hashlib import sha1
+from netaddr import IPAddress, IPNetwork
+from json import loads, dumps
+from subprocess import Popen, PIPE
+import os
+import logging
+
+
+# Pre-shared secret with Github.
+<%#- Will be populated with the puppet template function from hiera. -%>
+secret = '<%= @secret %>'
+
+
+# Uncomment this line in dev mode to see debug output.
+logging.basicConfig(level=logging.DEBUG)
+
+
+# Helper function to run git commands.
+def gitcmd(gitargs):
+    agentcmd = '/usr/bin/ssh-agent'
+    keycmd   = '/usr/bin/ssh-add ~<%= @user %>/.ssh/id_rsa-github'
+    gitcmd   = '/usr/bin/git'
+
+    # Determine the repository directory.
+    repo_dir = '<%= @repo_path %>'
+
+    # Change into the repository directory.
+    os.chdir(repo_dir)
+
+    # Run the command inside a transient ssh-agent instance so we can choose a key for git to use.
+    proc = Popen('{} /bin/sh -c \'{} && {} {}\''.format(agentcmd, keycmd, gitcmd, gitargs), stdout=PIPE, stderr=PIPE, shell=True)
+    stdout, stderr = proc.communicate()
+
+    return {
+        'command': '{} {}'.format(gitcmd, gitargs),
+        'repo_dir': repo_dir,
+        'stdout': stdout,
+        'stderr': stderr,
+        'returncode': proc.returncode,
+    }
+
+
+# Flask entry point.
+app = Flask(__name__)
+@app.route('/webhooks', methods=['POST'])
+def webhooks():
+
+
+    ##############################################################
+    ### VALIDATE INPUTS ##########################################
+    ##############################################################
+
+
+    # Get list of valid github source IPs for hooks from the metadata API.
+    github_ips = requests.get('https://api.github.com/meta').json()['hooks']
+
+    # Also allow localhost as this helps when testing.
+    github_ips.append('127.0.0.1')
+
+    # Try to determine the actual client IP from the X-Forwarded-For header.  The upstream proxy must
+    # be trusted to clean up the X-Forwarded-For header to prevent IP spoofing attacks.
+    if request.access_route and IPAddress(request.remote_addr) in IPNetwork('10.0.0.0/8'):
+      client_ip = request.access_route[0]
+    else:
+      client_ip = request.remote_addr
+
+    # Abort if the source IP of the request doesn't seem to be in the github "hooks" source range.
+    for cidr in github_ips:
+        if IPAddress(client_ip) in IPNetwork(cidr):
+            break
+    else:
+        logging.debug('Source IP {} not in permitted range.'.format(client_ip))
+        abort(403)
+
+    # If shared secret not set locally and in the hook request, then abort.
+    if not secret or not request.headers.get('X-Hub-Signature'):
+        logging.debug('X-Hub-Signature header was missing from request.')
+        abort(403)
+
+    # Github hashes the request using the shared secret, and provides this value as a header.
+    sig_type, req_sig = request.headers.get('X-Hub-Signature').split('=')
+
+    # Check the hash type as we only support sha1.
+    if not sig_type == 'sha1':
+        logging.debug('Github signature type was something other than sha1.')
+        abort(501)
+
+    # Hash the request using the local version of the secret key.
+    req_mac = hmac.new(str(secret), msg=request.data, digestmod=sha1).hexdigest()
+
+    # Compare our hash of the request with the hash provided by github in the header and ensure they match.
+    if not str(req_mac) == str(req_sig):
+        logging.debug('Github provided signature does not match locally computed signature.')
+        abort(403)
+
+    # What request type is github sending us?  Default to ping if cannot determine.
+    event = request.headers.get('X-GitHub-Event', 'ping')
+
+    # If we have a ping or unknown event (see default event above), then respond with pong and do nothing else.
+    if event == 'ping':
+        return dumps({'msg': 'pong'})
+
+    # Parse the request.
+    try:
+        json = loads(request.data)
+    except:
+        logging.debug('Unable to parse JSON input.')
+        logging.debug(request.data)
+        abort(400)
+
+
+
+    ##############################################################
+    ### PROCESS REQUEST ##########################################
+    ##############################################################
+
+
+    # We only care about push events.
+    if not event == 'push':
+        logging.debug('Event was something other than push or ping.')
+        abort(501)
+
+    # Update manifests.
+    git_fetch = gitcmd('fetch --all')
+
+    # Return success/fail data to github console.
+    ret_hash = {
+        'event': event,
+        'commands': {
+          'git_fetch': git_fetch,
+        },
+    }
+    return dumps(ret_hash, sort_keys=False, indent=4)
+
+
+# Run the application in standalone mode (i.e. if we are not embedded in an app server).
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)

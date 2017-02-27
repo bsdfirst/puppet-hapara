@@ -1,0 +1,45 @@
+<%
+
+##
+# Read puppet facts and convert to salt grains so that they can be used to
+# target nodes when using salt for orchestration.  We only include relatively
+# non-changing facts so that there isn't a change to the file every puppet run.
+##
+
+# Import the yaml library so we can use the to_yaml method.
+require 'yaml'
+
+# List of top level fact "keys" (as regex patterns) that should be converted to grains.
+patterns = [
+  '^agent_specified_environment$',
+  '^architecture$',
+  '^dmi$',
+  '^domain$',
+  '^gce$',
+  '^is_virtual$',
+  '^kernel.*$',
+  '^lsb.*$',
+  '^operatingsystem.*$',
+  '^os$',
+  '^processor.*$',
+  '^virtual$',
+  '^uuid$',
+]
+
+# Create an empty hash and create a "puppet" key that we will put all facts under.
+h = {}
+h['puppet'] = {}
+h['puppet']['facts'] = {}
+
+# Assign "trusted data" into our output array, use dup to unfreeze in case we modify later.
+h['puppet']['trusted'] = scope.compiler.topscope.to_hash['trusted'].dup
+
+# Make a copy of all facts to make it easy to referece later, use dup to unfreeze in case we modify later.
+facts = scope.compiler.topscope.to_hash['facts'].dup
+
+# Loop through each patter and add the matched facts into the output array.
+patterns.each { | pattern | h['puppet']['facts'].merge!( facts.select { | k, v | k.to_s =~ /#{pattern}/ } ) }
+
+-%>
+<%# Loop and output all relatively static facts as a yaml doc to import into salt as grains. -%>
+<%= h.to_yaml -%>

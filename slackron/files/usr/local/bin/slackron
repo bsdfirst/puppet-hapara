@@ -1,0 +1,89 @@
+#!/usr/bin/python
+
+import requests
+import sys
+import pwd
+import os
+import platform
+import time
+import json
+from subprocess import call, Popen, PIPE
+
+# Treat any commandline parameters as a script to execute.
+cmd = sys.argv[1:]
+
+# Slack webhooks to different channels.
+hooks = {
+  'cron': 'https://hooks.slack.com/services/###REDACTED###',
+  'production-alert': 'https://hooks.slack.com/services/###REDACTED###',
+}
+
+# Execute commands specified on the cmdline catch stdin/stdout.
+proc = Popen( cmd, shell=False, stdout=PIPE, stderr=PIPE, universal_newlines=True )
+stdout, stderr = proc.communicate() 
+rc = ( proc.returncode )
+
+# All cron output should go to the cron channel.
+api = [ hooks['cron'] ]
+
+# Evaluate the return code, choose colour and message byline.
+if rc:
+  color = 'danger'
+  pretext = 'A cron job exited with a non-zero status - this requires investigation.'
+  api.append( hooks['production-alert'] )  # also send output to production-alert channel
+elif len( stderr ):
+  color = 'warning'
+  pretext = 'A cron job exited with a zero status, but produced output to stderr - is this okay?'
+elif len( stdout ):
+  color = 'good'
+  pretext = 'A cron job appeared to complete successfully but produced output to stdout.'
+else:
+  # Cron job produced no output, and exited with a zero status - do nothing further.
+  sys.exit()
+
+# Empty fields are invalid further down.
+if not len( stderr ):
+  stderr = 'No Output'
+if not len( stdout ):
+  stdout = 'No Output'
+
+# Build the struct to pass to Slack.
+message = {
+  'attachments': [
+    {
+      'fallback': pretext,
+      'color': color,
+      'pretext': pretext,
+      'author_name': '{0} // {1}'.format( platform.node(), pwd.getpwuid( os.geteuid() ).pw_name ),
+      'fields': [
+        {
+          'title': 'cmd',
+          'value': '```{0}```'.format( cmd ),
+          'short': False
+        },
+        {
+          'title': 'stdout',
+          'value': '```{0}```'.format( stdout.strip() ),
+          'short': False
+        },
+        {
+          'title': 'stderr',
+          'value': '```{0}```'.format( stderr.strip() ),
+          'short': False
+        },
+        {
+          'title': 'code',
+          'value': rc,
+          'short': False
+        }
+      ],
+      'footer': 'Company Namem',
+      'footer_icon': 'https://domain.com/logo-32x32.png',
+      'ts': int(time.time()),
+      'mrkdwn_in': [ 'pretext', 'text', 'fields' ]
+    }
+  ]
+}
+
+for url in api:
+  requests.post(url, data=json.dumps(message), headers={ "content-type": "text/javascript"} )

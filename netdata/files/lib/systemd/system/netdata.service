@@ -1,0 +1,15 @@
+### FILE MANAGED BY PUPPET ###
+
+
+
+[Unit]
+Description=Linux real time system monitoring, done right
+After=network.target httpd.service squid.service nfs-server.service mysqld.service named.service postfix.service
+
+[Service]
+User=netdata
+Group=netdata
+ExecStart=/usr/sbin/netdata -nd
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+### FILE MANAGED BY PUPPET ###
+
+
+
+PATH=<%= @path %>
+<% if @email_dest -%>
+MAILTO=<%= @email_dest %>
+<% end -%>
+
+<%= !!@enabled ? '' : '#' %><%= @timespec %> <%= @user %> <%= !!@slackron ? 'slackron ' : '' %><%= @command %><%= !!@silent ? ' >/dev/null 2>&1' : '' %>
